@@ -68,6 +68,7 @@ extern struct flash_driver tms470_flash;
 extern struct flash_driver virtual_flash;
 extern struct flash_driver xmc1xxx_flash;
 extern struct flash_driver xmc4xxx_flash;
+extern struct flash_driver gct301s_flash;
 
 /**
  * The list of built-in flash drivers.
@@ -122,6 +123,7 @@ static struct flash_driver *flash_drivers[] = {
 	&virtual_flash,
 	&xmc1xxx_flash,
 	&xmc4xxx_flash,
+	&gct301s_flash,
 	NULL,
 };
 

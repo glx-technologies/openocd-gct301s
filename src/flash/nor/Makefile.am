@@ -55,7 +55,8 @@ NOR_DRIVERS = \
 	%D%/tms470.c \
 	%D%/virtual.c \
 	%D%/xmc1xxx.c \
-	%D%/xmc4xxx.c
+	%D%/xmc4xxx.c \
+	%D%/gct301s.c
 
 NORHEADERS = \
 	%D%/core.h \
