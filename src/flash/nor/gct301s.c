@@ -45,7 +45,7 @@
 #include <target/cortex_m.h>
 
 /* keep family IDs in decimal */
-
+#if 0
 #define EFM32_FLASH_ERASE_TMO           100
 #define EFM32_FLASH_WDATAREADY_TMO      100
 #define EFM32_FLASH_WRITE_TMO           100
@@ -83,6 +83,7 @@
 #define EFM32_MSC_STATUS_ERASEABORTED_MASK 0x20
 #define EFM32_MSC_LOCK                  (EFM32_MSC_REGBASE+0x03c)
 #define EFM32_MSC_LOCK_LOCKKEY          0x1b71
+#endif
 
 #define GCT301S_CFLASH_REGBASE  0x40017000UL
 #define GCT301S_DFLASH_REGBASE  0x40018000UL
@@ -103,8 +104,9 @@
 #define GCT301S_FLASH_NVRP_READ  0xA55A
 
 #define GCT301S_FLASH_ERASE_TMO  100
+#define GCT301S_FLASH_WRITE_TMO  100
 
-#define GCT301S_CFLASH_IF_MASK    0x1
+#define GCT301S_FLASH_IF_MASK    0x1
 
 struct gct301s_flash_bank {
 	int probed;
@@ -259,11 +261,13 @@ static int gct301s_set_reg_bits(struct flash_bank *bank, uint32_t reg,
 	return target_write_u32(bank->target, reg, reg_val);
 }
 
+#if 0
 static int gct301s_set_wren(struct flash_bank *bank, int write_enable)
 {
 	return gct301s_set_reg_bits(bank, EFM32_MSC_WRITECTRL,
 		EFM32_MSC_WRITECTRL_WREN_MASK, write_enable);
 }
+#endif
 
 static int gct301s_cflash_lock(struct flash_bank *bank, int lock)
 {
@@ -315,7 +319,7 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
 		return ret;
 
 	return gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO,
-		GCT301S_CFLASH_IF_MASK, 1);
+		GCT301S_FLASH_IF_MASK, 1);
 
 }
 
@@ -492,7 +496,13 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
 			0x71, 0x1b, 0x00, 0x00
 	};
 
-	/* flash write code */
+
+  /*****************************************/
+  return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
+  /*****************************************/
+#if 0	
+  
+  /* flash write code */
 	if (target_alloc_working_area(target, sizeof(gct301s_flash_write_code),
 			&write_algorithm) != ERROR_OK) {
 		LOG_WARNING("no working area available, can't do block memory writes");
@@ -563,79 +573,45 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
 	destroy_reg_param(&reg_params[2]);
 	destroy_reg_param(&reg_params[3]);
 	destroy_reg_param(&reg_params[4]);
+#endif
 
 	return ret;
 }
 
-static int gct301s_write_word(struct flash_bank *bank, uint32_t addr,
+static int gct301s_write_byte(struct flash_bank *bank, uint32_t addr,
 	uint32_t val)
 {
-	/* this function DOES NOT set WREN; must be set already */
-	/* 1. write address to ADDRB
-	   2. write LADDRIM
-	   3. check status (INVADDR, LOCKED)
-	   4. wait for WDATAREADY
-	   5. write data to WDATA
-	   6. write WRITECMD_WRITEONCE to WRITECMD
-	   7. wait until !STATUS_BUSY
-	 */
-
-	/* FIXME: EFM32G ref states (7.3.2) that writes should be
-	 * performed twice per dword */
-
 	int ret = 0;
 	uint32_t status = 0;
 
 	/* if not called, GDB errors will be reported during large writes */
 	keep_alive();
 
-	ret = target_write_u32(bank->target, EFM32_MSC_ADDRB, addr);
-	if (ERROR_OK != ret)
-		return ret;
-
-	ret = gct301s_set_reg_bits(bank, EFM32_MSC_WRITECMD,
-		EFM32_MSC_WRITECMD_LADDRIM_MASK, 1);
-	if (ERROR_OK != ret)
-		return ret;
-
-	ret = target_read_u32(bank->target, EFM32_MSC_STATUS, &status);
-	if (ERROR_OK != ret)
-		return ret;
-
-	LOG_DEBUG("status 0x%" PRIx32, status);
-
-	if (status & EFM32_MSC_STATUS_LOCKED_MASK) {
-		LOG_ERROR("Page is locked");
-		return ERROR_FAIL;
-	} else if (status & EFM32_MSC_STATUS_INVADDR_MASK) {
-		LOG_ERROR("Invalid address 0x%" PRIx32, addr);
-		return ERROR_FAIL;
-	}
-
-	ret = gct301s_wait_status(bank, EFM32_FLASH_WDATAREADY_TMO,
-		EFM32_MSC_STATUS_WDATAREADY_MASK, 1);
+  /* set program address */
+	ret = target_write_u32(bank->target, GCT301S_CFLASH_PROGADDR , addr);
 	if (ERROR_OK != ret) {
-		LOG_ERROR("Wait for WDATAREADY failed");
+		LOG_ERROR("PROGADDR write failed");
+		return ret;
+  }
+
+  /* set program data */
+	ret = target_write_u32(bank->target, GCT301S_CFLASH_PROGDATA, val);
+	if (ERROR_OK != ret) {
+		LOG_ERROR("PROGDATA write failed");
 		return ret;
 	}
 
-	ret = target_write_u32(bank->target, EFM32_MSC_WDATA, val);
+  /* set MPROG */
+	ret = target_write_u32(bank->target, GCT301S_CFLASH_PROG, 0x1);
 	if (ERROR_OK != ret) {
-		LOG_ERROR("WDATA write failed");
+		LOG_ERROR("PROG write failed");
 		return ret;
 	}
 
-	ret = target_write_u32(bank->target, EFM32_MSC_WRITECMD,
-		EFM32_MSC_WRITECMD_WRITEONCE_MASK);
+	ret = gct301s_wait_status(bank, GCT301S_FLASH_WRITE_TMO,
+		GCT301S_FLASH_IF_MASK, 1);
 	if (ERROR_OK != ret) {
-		LOG_ERROR("WRITECMD write failed");
-		return ret;
-	}
-
-	ret = gct301s_wait_status(bank, EFM32_FLASH_WRITE_TMO,
-		EFM32_MSC_STATUS_BUSY_MASK, 0);
-	if (ERROR_OK != ret) {
-		LOG_ERROR("Wait for BUSY failed");
+		LOG_ERROR("Wait for IF SET failed");
 		return ret;
 	}
 
@@ -653,6 +629,7 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 		return ERROR_TARGET_NOT_HALTED;
 	}
 
+#if 0
 	if (offset & 0x3) {
 		LOG_ERROR("offset 0x%" PRIx32 " breaks required 4-byte "
 			"alignment", offset);
@@ -673,18 +650,16 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 		memset(new_buffer, 0xff, count);
 		buffer = memcpy(new_buffer, buffer, old_count);
 	}
+#endif
 
-	uint32_t words_remaining = count / 4;
-	int retval, retval2;
+	uint32_t bytes_remaining = count;
+	int retval;
 
 	/* unlock flash registers */
 	gct301s_cflash_lock(bank, 0);
-	retval = gct301s_set_wren(bank, 1);
-	if (retval != ERROR_OK)
-		goto cleanup;
 
 	/* try using a block write */
-	retval = gct301s_write_block(bank, buffer, offset, words_remaining);
+	retval = gct301s_write_block(bank, buffer, offset, bytes_remaining);
 
 	if (retval == ERROR_TARGET_RESOURCE_NOT_AVAILABLE) {
 		/* if block write failed (no sufficient working area),
@@ -692,25 +667,20 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 		LOG_WARNING("couldn't use block writes, falling back to single "
 			"memory accesses");
 
-		while (words_remaining > 0) {
-			uint32_t value;
-			memcpy(&value, buffer, sizeof(uint32_t));
+		while (bytes_remaining > 0) {
 
-			retval = gct301s_write_word(bank, offset, value);
+			retval = gct301s_write_byte(bank, offset, *buffer);
 			if (retval != ERROR_OK)
 				goto reset_pg_and_lock;
 
-			words_remaining--;
-			buffer += 4;
-			offset += 4;
+			bytes_remaining--;
+			buffer += 1;
+			offset += 1;
 		}
 	}
 
 reset_pg_and_lock:
-	retval2 = gct301s_set_wren(bank, 0);
 	gct301s_cflash_lock(bank, 1);
-	if (retval == ERROR_OK)
-		retval = retval2;
 
 cleanup:
 	if (new_buffer)
