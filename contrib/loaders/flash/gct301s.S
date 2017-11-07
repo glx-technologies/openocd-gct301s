@@ -1,11 +1,9 @@
 /***************************************************************************
- *   Copyright (C) 2014 by Angus Gratton                                   *
- *   Derived from stm32f1x.S:
  *   Copyright (C) 2011 by Andreas Fritiofson                              *
  *   andreas.fritiofson@gmail.com                                          *
  *   Copyright (C) 2013 by Roman Dmitrienko                                *
  *   me@iamroman.org                                                       *
- *   Copyright (C) 2017 by MowSong Ng                                      *
+ *   Copyright (C) 2017 by Ng Mow Song                                     *
  *   mowsong@gmail.com                                                     *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
@@ -19,56 +17,79 @@
  *   GNU General Public License for more details.                          *
  *                                                                         *
  *   You should have received a copy of the GNU General Public License     *
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.           *
  ***************************************************************************/
+
+/*
+ * To assemble:
+ * arm-none-eabi-gcc -c gct301s.S
+ *
+ * To disassemble:
+ * arm-none-eabi-objdump -S gct301s.o
+ */
 	.text
 	.syntax unified
 	.cpu cortex-m0
 	.thumb
 	.thumb_func
 
-/* Written for NRF51822 (src/flash/nor/nrf51.c) however the NRF NVMC is
- * very generic (CPU blocks during flash writes), so this is actually
- * just a generic word-oriented copy routine for Cortex-M0 (also
- * suitable for Cortex-M0+/M3/M4.)
- *
- * To assemble:
- * arm-none-eabi-gcc -c gct301s.S
- *
- * To disassemble:
- * arm-none-eabi-objdump -S gct301s.o > gct301s.lst
- *
- * Thanks to Jens Bauer for providing advice on some of the tweaks.
- */
-
 	/* Params:
-	 * r0 - byte count (in)
-	 * r1 - workarea start
-	 * r2 - workarea end
-	 * r3 - target address
+	 * r0 - flash base (in), status (out)
+	 * r1 - count (word-32bit)
+	 * r2 - workarea start
+	 * r3 - workarea end
+	 * r4 - target address
 	 * Clobbered:
-	 * r4 - rp
-	 * r5 - wp, tmp
+	 * r5 - rp
+	 * r6 - wp, tmp
+	 * r7 - tmp
 	 */
 
+/* offsets of registers from flash reg base for GCT301S */
+#define GCT301S_FLASH_PROGADDR  0x010
+#define GCT301S_FLASH_PROGDATA  0x014
+#define GCT301S_FLASH_PROG      0x018
+#define GCT301S_FLASH_IF        0x020
+
 wait_fifo:
-	ldr 	r5, [r1, #0]	/* read wp */
-	cmp 	r5, #0	        /* abort if wp == 0 */
-	beq 	exit
-	ldr 	r4, [r1, #4]	/* read rp */
-	cmp 	r4, r5		/* wait until rp != wp */
-	beq 	wait_fifo
+	ldr     r6, [r2, #0]                        /* read wp */
+	cmp     r6, #0                              /* abort if wp == 0 */
+	beq     exit
+	ldr     r5, [r2, #4]                        /* read rp */
+	cmp     r5, r6                              /* wait until rp != wp */
+	beq     wait_fifo
 
-	ldmia	r4!, {r5}	/* "*target_address++ = *rp++" */
-        stmia   r3!, {r5}
+	str     r4, [r0, #GCT301S_FLASH_PROGADDR]   /* store address in PROGADDR */
+	
+    ldrb    r6, [r5]                            /* store data in PROGDATA !!!byte!!! */
+    str     r6, [r0, #GCT301S_FLASH_PROGDATA]   
+   
+    movs    r6, #1                              /* set MPROG */
+    str     r6, [r0, #GCT301S_FLASH_PROG]
 
-        cmp 	r4, r2		/* wrap rp at end of work area buffer */
-	bcc	no_wrap
-	mov	r4, r1
-	adds	r4, #8          /* skip rp,wp at start of work area */
+	adds    r5, #1                              /* rp++ */
+	adds    r4, #1                              /* target_address++ */
+
+busy:                                           /* wait until IF flag is set */
+	ldr     r6, [r0, #GCT301S_FLASH_IF]
+	movs    r7, #1
+	tst     r6, r7
+	beq     busy
+
+	cmp     r5, r3                              /* wrap rp at end of buffer */
+	bcc     no_wrap
+	mov     r5, r2
+	adds    r5, #8
+
 no_wrap:
-	str 	r4, [r1, #4]	/* write back rp */
-	subs	r0, #4          /* decrement byte count */
-	bne     wait_fifo	/* loop if not done */
+	str     r5, [r2, #4]                        /* store rp */
+	subs    r1, r1, #1                          /* decrement byte count */
+	cmp     r1, #0
+	beq     exit                                /* loop if not done */
+	b       wait_fifo
+
 exit:
+	mov     r0, r6                              /* return status in r0 */
 	bkpt    #0
