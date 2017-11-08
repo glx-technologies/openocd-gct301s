@@ -336,7 +336,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     uint32_t offset, uint32_t count)
 {
     struct target *target = bank->target;
-    uint32_t buffer_size = 2048;
+    uint32_t buffer_size = 4096;
     struct working_area *write_algorithm;
     struct working_area *source;
     uint32_t address = bank->base + offset;
@@ -396,6 +396,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     while (target_alloc_working_area_try(target, buffer_size, &source) != ERROR_OK) {
         buffer_size /= 2;
         buffer_size &= ~3UL; /* Make sure it's 4 byte aligned */
+        LOG_INFO("Reducing buffer size to %d", buffer_size);
         if (buffer_size <= 256) {
             /* we already allocated the writing code, but failed to get a
              * buffer, free the algorithm */
