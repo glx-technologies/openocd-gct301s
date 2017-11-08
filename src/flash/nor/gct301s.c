@@ -645,49 +645,45 @@ static int get_gct301s_info(struct flash_bank *bank, char *buf, int buf_size)
     return gct301s_decode_info(&info, buf, buf_size);
 }
 
-COMMAND_HANDLER(gct301s_handle_debuglock_command)
+COMMAND_HANDLER(gct301s_handle_erase_config_command)
 {
-    struct target *target = NULL;
+    LOG_INFO("Erase config");
+    return ERROR_OK;
+}
 
-    if (CMD_ARGC < 1)
-        return ERROR_COMMAND_SYNTAX_ERROR;
+COMMAND_HANDLER(gct301s_handle_write_config_command)
+{
+    LOG_INFO("Write config");
+    return ERROR_OK;
+}
 
-    struct flash_bank *bank;
-    int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
-    if (ERROR_OK != retval)
-        return retval;
-
-    struct gct301s_flash_bank *gct301s_info = bank->driver_priv;
-
-    target = bank->target;
-
-    if (target->state != TARGET_HALTED) {
-        LOG_ERROR("Target not halted");
-        return ERROR_TARGET_NOT_HALTED;
-    }
-
-    uint32_t *ptr;
-    //ptr = gct301s_info->lb_page + 127;
-    *ptr = 0;
-
-    retval = gct301s_write_lock_data(bank);
-    if (ERROR_OK != retval) {
-        LOG_ERROR("Failed to write LB page");
-        return retval;
-    }
-
-    command_print(CMD_CTX, "gct301s debug interface locked, reset the device to apply");
-
+COMMAND_HANDLER(gct301s_handle_read_config_command)
+{
+    LOG_INFO("Read config");
     return ERROR_OK;
 }
 
 static const struct command_registration gct301s_exec_command_handlers[] = {
     {
-        .name = "debuglock",
-        .handler = gct301s_handle_debuglock_command,
+        .name = "erase_config",
+        .handler = gct301s_handle_erase_config_command,
         .mode = COMMAND_EXEC,
         .usage = "bank_id",
-        .help = "Lock the debug interface of the device.",
+        .help = "Erase configuration words.",
+    },
+    {
+        .name = "write_config",
+        .handler = gct301s_handle_write_config_command,
+        .mode = COMMAND_EXEC,
+        .usage = "bank_id",
+        .help = "Write configuration words.",
+    },
+    {
+        .name = "read_config",
+        .handler = gct301s_handle_read_config_command,
+        .mode = COMMAND_EXEC,
+        .usage = "bank_id",
+        .help = "Read configuration words.",
     },
     COMMAND_REGISTRATION_DONE
 };
@@ -696,7 +692,7 @@ static const struct command_registration gct301s_command_handlers[] = {
     {
         .name = "gct301s",
         .mode = COMMAND_ANY,
-        .help = "gct flash command group",
+        .help = "gct301s flash command group",
         .usage = "",
         .chain = gct301s_exec_command_handlers,
     },
