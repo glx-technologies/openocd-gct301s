@@ -80,6 +80,8 @@ struct gct_info {
     uint16_t page_size;
 };
 
+static int gct301s_mass_erase(struct flash_bank *bank);
+
 static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
     uint32_t offset, uint32_t count);
 
@@ -256,25 +258,25 @@ static int gct301s_erase(struct flash_bank *bank, int first, int last)
         return ERROR_TARGET_NOT_HALTED;
     }
 
-  LOG_DEBUG("Enable flash write");
+    LOG_DEBUG("Enable flash write");
     ret = gct301s_cflash_lock(bank, 0);
     if (ERROR_OK != ret) {
         LOG_ERROR("Failed to enable flash write");
         return ret;
     }
-  LOG_DEBUG("Flash write enabled");
+    LOG_DEBUG("Flash write enabled");
   
-  LOG_DEBUG("Flash erase started");
+    LOG_DEBUG("Flash erase started");
     
-  for (i = first; i <= last; i++) {
+    for (i = first; i <= last; i++) {
         ret = gct301s_erase_page(bank, bank->sectors[i].offset);
         if (ERROR_OK != ret)
             LOG_ERROR("Failed to erase page %d", i);
     }
   
-  LOG_DEBUG("Flash erase ended");
+    LOG_DEBUG("Flash erase ended");
     
-  ret = gct301s_cflash_lock(bank, 1);
+    ret = gct301s_cflash_lock(bank, 1);
 
     return ret;
 }
@@ -645,6 +647,61 @@ static int get_gct301s_info(struct flash_bank *bank, char *buf, int buf_size)
     return gct301s_decode_info(&info, buf, buf_size);
 }
 
+static int gct301s_mass_erase(struct flash_bank *bank)
+{
+	int ret = 0;
+    struct target *target = bank->target;
+
+	if (target->state != TARGET_HALTED) {
+		LOG_ERROR("Target not halted");
+		return ERROR_TARGET_NOT_HALTED;
+	}
+
+    /* unlock */
+    gct301s_cflash_lock(bank, 0);
+
+    /* erase all main page */
+    ret = target_write_u32(bank->target, GCT301S_CFLASH_ERA, 0x2);
+    if (ERROR_OK != ret)
+        return ret;
+
+    ret = gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO, GCT301S_FLASH_IF_MASK, 1);
+    if (ERROR_OK != ret)
+        return ret;
+
+    /* lock */
+    gct301s_cflash_lock(bank, 1);
+
+    return ERROR_OK;
+}
+
+COMMAND_HANDLER(gct301s_handle_mass_erase_command)
+{
+	int i;
+    
+    LOG_INFO("Mass erase");
+
+	if (CMD_ARGC < 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+
+	struct flash_bank *bank;
+	int retval = CALL_COMMAND_HANDLER(flash_command_get_bank, 0, &bank);
+	if (ERROR_OK != retval)
+		return retval;
+
+	retval = gct301s_mass_erase(bank);
+	if (retval == ERROR_OK) {
+		/* set all sectors as erased */
+		for (i = 0; i < bank->num_sectors; i++)
+			bank->sectors[i].is_erased = 1;
+
+		command_print(CMD_CTX, "gct301s mass erase complete");
+	} else
+		command_print(CMD_CTX, "gct301s mass erase failed");
+
+	return retval;
+}
+
 COMMAND_HANDLER(gct301s_handle_erase_config_command)
 {
     LOG_INFO("Erase config");
@@ -664,6 +721,13 @@ COMMAND_HANDLER(gct301s_handle_read_config_command)
 }
 
 static const struct command_registration gct301s_exec_command_handlers[] = {
+    {
+        .name = "mass_erase",
+        .handler = gct301s_handle_mass_erase_command,
+        .mode = COMMAND_EXEC,
+        .usage = "bank_id",
+        .help = "Erase all code flash pages.",
+    },
     {
         .name = "erase_config",
         .handler = gct301s_handle_erase_config_command,
