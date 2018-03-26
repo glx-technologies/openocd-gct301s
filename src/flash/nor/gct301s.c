@@ -86,18 +86,21 @@
 #define GCT301S_NVR_SIZE    (uint32_t)(1   * 256)
 #define GCT301S_DATA_SIZE   (uint32_t)(128 * 256)
 
-#define GCT301S_RAM_SIZE    (uint32_t)(6 * 1024)
-
 struct gct301s_flash_bank {
     int probed;
+    uint32_t reg_base;
+    uint32_t reg_flash_key;
+    uint32_t reg_flash_nvrp;
+    uint32_t reg_erasctr;
+    uint32_t reg_era;
+    uint32_t reg_progaddr;
+    uint32_t reg_progdata;
+    uint32_t reg_prog;
+    uint32_t reg_if;
 };
 
 struct gct_info {
     uint32_t flash_sz;
-    uint32_t ram_sz;
-    uint16_t part_num;
-    uint8_t part_family;
-    uint8_t prod_rev;
     uint16_t page_size;
 };
 
@@ -106,91 +109,40 @@ static int gct301s_mass_erase(struct flash_bank *bank);
 static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
     uint32_t offset, uint32_t count);
 
-static int gct301s_get_flash_size(struct flash_bank *bank, uint32_t *flash_sz)
-{
-  int retval = ERROR_OK;
-
-  if (bank->base == GCT301S_CODE_BASE) {
-    *flash_sz = GCT301S_CODE_SIZE;
-  }
-  else if (bank->base == GCT301S_NVR_BASE) {
-    *flash_sz = GCT301S_NVR_SIZE;
-  }
-  else if (bank->base == GCT301S_DATA_BASE) {
-    *flash_sz = GCT301S_DATA_SIZE;
-  }
-  else {
-    LOG_ERROR("Invalid flash bank id.");    
-    retval = ERROR_FLASH_BANK_INVALID;
-  }
-
-  return retval;
-}
-
-static int gct301s_get_ram_size(struct flash_bank *bank, uint32_t *ram_sz)
-{
-  *ram_sz = GCT301S_RAM_SIZE;
-  return ERROR_OK;
-}
-
-static int gct301s_get_part_num(struct flash_bank *bank, uint16_t *pnum)
-{
-  *pnum = 0x0301;
-  return ERROR_OK;
-}
-
-static int gct301s_get_part_family(struct flash_bank *bank, uint8_t *pfamily)
-{
-  *pfamily = 0x0;
-  return ERROR_OK;
-}
-
-static int gct301s_get_prod_rev(struct flash_bank *bank, uint8_t *prev)
-{
-  *prev = 0x0;
-  return ERROR_OK;
-}
-
 static int gct301s_read_info(struct flash_bank *bank,
     struct gct_info *gct_info)
 {
-    int ret;
-    uint32_t cpuid = 0;
+  int ret;
+  uint32_t cpuid = 0;
 
-    memset(gct_info, 0, sizeof(struct gct_info));
+  memset(gct_info, 0, sizeof(struct gct_info));
 
-    ret = target_read_u32(bank->target, CPUID, &cpuid);
-    if (ERROR_OK != ret)
-        return ret;
-
-    if (((cpuid >> 4) & 0xfff) == 0xc20) {
-        /* Cortex-M0 device */
-    } else {
-        LOG_ERROR("Target is not GCT301S Cortex-M0 Device");
-        return ERROR_FAIL;
-    }
-
-    ret = gct301s_get_flash_size(bank, &(gct_info->flash_sz));
-    if (ERROR_OK != ret)
-        return ret;
-
-    ret = gct301s_get_ram_size(bank, &(gct_info->ram_sz));
-    if (ERROR_OK != ret)
-        return ret;
-
-    ret = gct301s_get_part_num(bank, &(gct_info->part_num));
-    if (ERROR_OK != ret)
-        return ret;
-
-    ret = gct301s_get_part_family(bank, &(gct_info->part_family));
-    if (ERROR_OK != ret)
-        return ret;
-
-    ret = gct301s_get_prod_rev(bank, &(gct_info->prod_rev));
-    if (ERROR_OK != ret)
-        return ret;
+  ret = target_read_u32(bank->target, CPUID, &cpuid);
+  if (ERROR_OK != ret)
+    return ret;
   
+  if (((cpuid >> 4) & 0xfff) == 0xc20) {
+    /* Cortex-M0 device */
+  } else {
+    LOG_ERROR("Target is not GCT301S Cortex-M0 Device");
+    return ERROR_FAIL;
+  }
+
   gct_info->page_size = 256;
+  
+  if (bank->base == GCT301S_CODE_BASE) {
+    gct_info->flash_sz = GCT301S_CODE_SIZE;
+  }
+  else if (bank->base == GCT301S_NVR_BASE) {
+    gct_info->flash_sz = GCT301S_NVR_SIZE;
+  }
+  else if (bank->base == GCT301S_DATA_BASE) {
+    gct_info->flash_sz = GCT301S_DATA_SIZE;
+  }
+  else {
+    LOG_ERROR("Invalid flash bank id.");    
+    return ERROR_FLASH_BANK_INVALID;
+  }
     
   return ERROR_OK;
 }
@@ -225,21 +177,14 @@ FLASH_BANK_COMMAND_HANDLER(gct301s_flash_bank_command)
 
     bank->driver_priv = gct301s_info;
     gct301s_info->probed = 0;
-
     return ERROR_OK;
 }
 
 static int gct301s_flash_lock(struct flash_bank *bank, int lock)
 {
-  if (bank->base == GCT301S_CODE_BASE) {
-    return target_write_u32(bank->target, GCT301S_CFLASH_KEY, (lock ? 0 : GCT301S_FLASH_UNLOCK_KEY));
-  }
-  else if (bank->base == GCT301S_NVR_BASE) {
-    return target_write_u32(bank->target, GCT301S_CFLASH_NVRP, (lock ? 0 : GCT301S_FLASH_NVRP_WRITE));
-  }
-  else if (bank->base == GCT301S_DATA_BASE) {
-    return target_write_u32(bank->target, GCT301S_DFLASH_KEY, (lock ? 0 : GCT301S_FLASH_UNLOCK_KEY));
-  }
+  struct gct301s_flash_bank *bank_info = bank->driver_priv;
+
+  return target_write_u32(bank->target, bank_info->reg_flash_key, (lock ? 0 : GCT301S_FLASH_UNLOCK_KEY));
 }
 
 static int gct301s_wait_status(struct flash_bank *bank, int timeout,
@@ -275,35 +220,40 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
 {
     int ret = 0;
     uint32_t status = 0;
+    struct gct301s_flash_bank *bank_info = bank->driver_priv;
 
-    LOG_INFO("erasing flash page at 0x%08" PRIx32, bank->base+addr);
+    LOG_DEBUG("erasing flash page at 0x%08" PRIx32, bank->base+addr);
  
-    if (bank->base == GCT301S_CODE_BASE) {
-        ret = target_write_u32(bank->target, GCT301S_CFLASH_ERASCTR, (addr >> 8));
-        if (ERROR_OK != ret)
-            return ret;
+    if (bank->base == GCT301S_NVR_BASE) {
+      ret = target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_WRITE);
+      if (ERROR_OK != ret)
+        return ret;
+      
+      ret = target_write_u32(bank->target, bank_info->reg_erasctr, (addr >> 8));
+      if (ERROR_OK != ret)
+        return ret;
 
-        ret = target_write_u32(bank->target, GCT301S_CFLASH_ERA, 0x1);
-        if (ERROR_OK != ret)
-            return ret;
+      ret = target_write_u32(bank->target, bank_info->reg_era, 0x4);
+      if (ERROR_OK != ret)
+        return ret;
 
-        return gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO,
-            GCT301S_FLASH_IF_MASK, 1);
+      ret = gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO, GCT301S_FLASH_IF_MASK, 1);
+      if (ERROR_OK != ret)
+        return ret;
+      
+      return target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_WRITE);
     }
-    else if (bank->base == GCT301S_NVR_BASE) {
-       return ERROR_OK; 
-    }
-    else if (bank->base == GCT301S_DATA_BASE) {
-        ret = target_write_u32(bank->target, GCT301S_DFLASH_ERASCTR, (addr >> 8));
-        if (ERROR_OK != ret)
-            return ret;
+    else {
+      ret = target_write_u32(bank->target, bank_info->reg_erasctr, (addr >> 8));
+      if (ERROR_OK != ret)
+        return ret;
 
-        ret = target_write_u32(bank->target, GCT301S_DFLASH_ERA, 0x1);
-        if (ERROR_OK != ret)
-            return ret;
+      ret = target_write_u32(bank->target, bank_info->reg_era, 0x1);
+      if (ERROR_OK != ret)
+        return ret;
 
-        return gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO,
-            GCT301S_FLASH_IF_MASK, 1);
+      return gct301s_wait_status(bank, GCT301S_FLASH_ERASE_TMO,
+        GCT301S_FLASH_IF_MASK, 1);
     }
 }
 
@@ -318,13 +268,13 @@ static int gct301s_erase(struct flash_bank *bank, int first, int last)
         return ERROR_TARGET_NOT_HALTED;
     }
 
-    LOG_INFO("Enable flash write");
+    LOG_DEBUG("Enable flash write");
     ret = gct301s_flash_lock(bank, 0);
     if (ERROR_OK != ret) {
         LOG_ERROR("Failed to enable flash write");
         return ret;
     }
-    LOG_INFO("Flash write enabled");
+    LOG_DEBUG("Flash write enabled");
   
     LOG_DEBUG("Flash erase started");
     
@@ -404,10 +354,12 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     uint32_t address = bank->base + offset;
     struct reg_param reg_params[5];
     struct armv7m_algorithm armv7m_info;
+    
+    struct gct301s_flash_bank *bank_info = bank->driver_priv;
     int ret = ERROR_OK;
 
     /* see contrib/loaders/flash/gct301s.S for src */
-    static const uint8_t gct301s_flash_write_code[] = {
+    static const uint8_t gct301s_flash_write_code_0[] = {
         /* wait_fifo: */
         0x16, 0x68,         /* ldr    r6, [r2, #0]   */
         0x00, 0x2e,         /* cmp    r6, #0         */
@@ -441,16 +393,62 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
         0x30, 0x46,         /* mov    r0, r6         */
         0x00, 0xbe,         /* bkpt   0x0000         */
     };
-  
+    
+    static const uint8_t gct301s_flash_write_code_1[] = {
+        /* wait_fifo: */
+        0x16, 0x68,         /* ldr    r6, [r2, #0]   */
+        0x00, 0x2e,         /* cmp    r6, #0         */
+        0x16, 0xd0,         /* beq    exit           */
+        0x55, 0x68,         /* ldr    r5, [r2, #4]   */
+        0xb5, 0x42,         /* cmp    r5, r6         */
+        0xf9, 0xd0,         /* beq    wait_fifo      */
+        0x04, 0x61,         /* str    r4, [r0, #16]  */
+        0x2e, 0x78,         /* ldrb   r6, [r5, #0]   */
+        0x46, 0x61,         /* str    r6, [r0, #20]  */
+        0x02, 0x26,         /* movs   r6, #1         */
+        0x86, 0x61,         /* str    r6, [r0, #24]  */
+        0x01, 0x35,         /* adds   r5, #1         */
+        0x01, 0x34,         /* adds   r4, #1         */
+        /* busy: */
+        0x06, 0x6a,         /* ldr    r6, [r0, #32]  */
+        0x01, 0x27,         /* movs   r7, #1         */
+        0x3e, 0x42,         /* tst    r6, r7         */
+        0xfb, 0xd0,         /* beq    busy           */
+        0x9d, 0x42,         /* cmp    r5, r3         */
+        0x01, 0xd3,         /* bcc    no_wrap        */
+        0x15, 0x46,         /* mov    r5, r2         */
+        0x08, 0x35,         /* adds   r5, #8         */
+        /* no_wrap: */   
+        0x55, 0x60,         /* str    r5, [r2, #4]   */
+        0x01, 0x39,         /* subs   r1, #1         */
+        0x00, 0x29,         /* cmp    r1, #0         */
+        0x00, 0xd0,         /* beq    exit           */
+        0xe5, 0xe7,         /* b      wait_fifo      */
+        /* exit: */
+        0x30, 0x46,         /* mov    r0, r6         */
+        0x00, 0xbe,         /* bkpt   0x0000         */
+    };
+
+    uint8_t *flash_write_code;
+
+    LOG_INFO("Writing bank %d (base = 0x%08" PRIx32 ")", bank->bank_number, bank->base);
+
+    if (bank->base == GCT301S_NVR_BASE) {
+      flash_write_code  = gct301s_flash_write_code_1; 
+    }
+    else {
+      flash_write_code  = gct301s_flash_write_code_0; 
+    }
+
     /* flash write code */
-    if (target_alloc_working_area(target, sizeof(gct301s_flash_write_code),
+    if (target_alloc_working_area(target, sizeof(gct301s_flash_write_code_0),
             &write_algorithm) != ERROR_OK) {
         LOG_WARNING("no working area available, can't do block memory writes");
         return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
     }
 
     ret = target_write_buffer(target, write_algorithm->address,
-            sizeof(gct301s_flash_write_code), gct301s_flash_write_code);
+            sizeof(gct301s_flash_write_code_0), flash_write_code);
     if (ret != ERROR_OK)
         return ret;
 
@@ -475,9 +473,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     init_reg_param(&reg_params[3], "r3", 32, PARAM_OUT);    /* buffer end */
     init_reg_param(&reg_params[4], "r4", 32, PARAM_IN_OUT); /* target address */
 
-    uint32_t reg_base = (bank->base == GCT301S_DATA_BASE ? GCT301S_DFLASH_REGBASE : GCT301S_CFLASH_REGBASE);
-
-    buf_set_u32(reg_params[0].value, 0, 32, reg_base);
+    buf_set_u32(reg_params[0].value, 0, 32, bank_info->reg_base);
     buf_set_u32(reg_params[1].value, 0, 32, count);
     buf_set_u32(reg_params[2].value, 0, 32, source->address);
     buf_set_u32(reg_params[3].value, 0, 32, source->address + source->size);
@@ -516,39 +512,26 @@ static int gct301s_write_byte(struct flash_bank *bank, uint32_t addr,
     int ret = 0;
     uint32_t status = 0;
     
-    uint32_t reg_progaddr;
-    uint32_t reg_progdata;
-    uint32_t reg_prog;
-    
+    struct gct301s_flash_bank *bank_info = bank->driver_priv;
+
     /* if not called, GDB errors will be reported during large writes */
     keep_alive();
 
-    if (bank->base == GCT301S_DATA_BASE) {
-        reg_progaddr = GCT301S_DFLASH_PROGADDR;
-        reg_progdata = GCT301S_DFLASH_PROGDATA;
-        reg_prog     = GCT301S_DFLASH_PROG;
-    }
-    else {
-        reg_progaddr = GCT301S_CFLASH_PROGADDR;
-        reg_progdata = GCT301S_CFLASH_PROGDATA;
-        reg_prog     = GCT301S_CFLASH_PROG;
-    }
-
     /* set program address */
-    ret = target_write_u32(bank->target, reg_progaddr , addr);
+    ret = target_write_u32(bank->target, bank_info->reg_progaddr , addr);
     if (ERROR_OK != ret) {
         LOG_ERROR("PROGADDR write failed");
         return ret;
-  }
+    }
 
-    ret = target_write_u32(bank->target, reg_progdata, val);
+    ret = target_write_u32(bank->target, bank_info->reg_progdata, val);
     if (ERROR_OK != ret) {
         LOG_ERROR("PROGDATA write failed");
         return ret;
     }
 
     /* set MPROG */
-    ret = target_write_u32(bank->target, reg_prog, 0x1);
+    ret = target_write_u32(bank->target, bank_info->reg_prog, 0x1);
     if (ERROR_OK != ret) {
         LOG_ERROR("PROG write failed");
         return ret;
@@ -618,6 +601,11 @@ cleanup:
     return retval;
 }
 
+#define GCT301S_HSRC_CTL    0x4001D020UL
+#define GCT301S_LSRC_CTL    0x4001D024UL
+#define GCT301S_CLK_SRCSEL  0x4001D018UL
+#define GCT301S_CLK_DIVSEL  0x4001D014UL
+
 static int gct301s_probe(struct flash_bank *bank)
 {
     struct gct301s_flash_bank *gct301s_info = bank->driver_priv;
@@ -625,6 +613,46 @@ static int gct301s_probe(struct flash_bank *bank)
     int ret;
     int i;
     char buf[256];
+    
+    uint32_t read_val;
+
+    // disable LSRC in case WDT is running
+    ret = target_read_u32(bank->target, GCT301S_LSRC_CTL, &read_val);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to read LSRC_CTL");
+        return ret;
+    }
+
+    ret = target_write_u32(bank->target, GCT301S_LSRC_CTL , read_val | 0x1);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write LSRC_CTL");
+        return ret;
+    }
+    
+    ret = target_read_u32(bank->target, GCT301S_HSRC_CTL, &read_val);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to read LSRC_CTL");
+        return ret;
+    }
+
+    ret = target_write_u32(bank->target, GCT301S_HSRC_CTL , read_val & (~0x2));
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write HSRC_CTL");
+        return ret;
+    }
+
+    ret = target_write_u32(bank->target, GCT301S_CLK_SRCSEL , 0x0);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write CLK_SRCSEL");
+        return ret;
+    }
+
+    ret = target_write_u32(bank->target, GCT301S_CLK_DIVSEL , 0x0);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write CLK_DIVSEL");
+        return ret;
+    }
+
 
     gct301s_info->probed = 0;
 
@@ -637,7 +665,7 @@ static int gct301s_probe(struct flash_bank *bank)
         return ret;
 
     //LOG_INFO("detected part: %s", buf);
-    LOG_INFO("bank number = %d, base = 0x%08" PRIx32 ", flash size = %d bytes", bank->bank_number, bank->base, gct_mcu_info.flash_sz);
+    //LOG_INFO("bank number = %d, base = 0x%08" PRIx32 ", flash size = %d bytes", bank->bank_number, bank->base, gct_mcu_info.flash_sz);
     //LOG_INFO("flash page size = %d bytes", gct_mcu_info.page_size);
 
     assert(0 != gct_mcu_info.page_size);
@@ -652,7 +680,6 @@ static int gct301s_probe(struct flash_bank *bank)
         bank->sectors = NULL;
     }
 
-    //bank->base = bank->base;
     bank->size = (num_pages * gct_mcu_info.page_size);
     bank->num_sectors = num_pages;
 
@@ -672,6 +699,29 @@ static int gct301s_probe(struct flash_bank *bank)
     }
 
     gct301s_info->probed = 1;
+
+    if (bank->base == GCT301S_DATA_BASE) {
+      gct301s_info->reg_base       = GCT301S_DFLASH_REGBASE;
+      gct301s_info->reg_flash_key  = GCT301S_DFLASH_KEY; 
+      gct301s_info->reg_flash_nvrp = GCT301S_DFLASH_NVRP; 
+      gct301s_info->reg_erasctr    = GCT301S_DFLASH_ERASCTR;
+      gct301s_info->reg_era        = GCT301S_DFLASH_ERA;
+      gct301s_info->reg_progaddr   = GCT301S_DFLASH_PROGADDR;
+      gct301s_info->reg_progdata   = GCT301S_DFLASH_PROGDATA;
+      gct301s_info->reg_prog       = GCT301S_DFLASH_PROG;
+      gct301s_info->reg_if         = GCT301S_DFLASH_IF;
+    }
+    else {
+      gct301s_info->reg_base       = GCT301S_CFLASH_REGBASE;
+      gct301s_info->reg_flash_key  = GCT301S_CFLASH_KEY; 
+      gct301s_info->reg_flash_nvrp = GCT301S_CFLASH_NVRP; 
+      gct301s_info->reg_erasctr    = GCT301S_CFLASH_ERASCTR;
+      gct301s_info->reg_era        = GCT301S_CFLASH_ERA;
+      gct301s_info->reg_progaddr   = GCT301S_CFLASH_PROGADDR;
+      gct301s_info->reg_progdata   = GCT301S_CFLASH_PROGDATA;
+      gct301s_info->reg_prog       = GCT301S_CFLASH_PROG;
+      gct301s_info->reg_if         = GCT301S_CFLASH_IF;
+    }
 
     return ERROR_OK;
 }
