@@ -434,10 +434,10 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     LOG_INFO("Writing bank %d (base = 0x%08" PRIx32 ")", bank->bank_number, bank->base);
 
     if (bank->base == GCT301S_NVR_BASE) {
-      flash_write_code  = gct301s_flash_write_code_1; 
+      flash_write_code  = (uint8_t *)gct301s_flash_write_code_1; 
     }
     else {
-      flash_write_code  = gct301s_flash_write_code_0; 
+      flash_write_code  = (uint8_t *)gct301s_flash_write_code_0; 
     }
 
     /* flash write code */
