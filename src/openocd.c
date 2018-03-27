@@ -336,6 +336,9 @@ int openocd_main(int argc, char *argv[])
 		"http://openocd.org/doc/doxygen/bugs.html"
 		"\n");
 
+    LOG_OUTPUT("\nThis fork is done by Suzhou Galaxy Camphol & GLX Technologies\n\t"
+               "https://github.com/mowsong/openocd-gct301s\n\n");
+
 	command_context_mode(cmd_ctx, COMMAND_CONFIG);
 	command_set_output_handler(cmd_ctx, configuration_output_handler, NULL);
 
