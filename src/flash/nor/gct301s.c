@@ -241,7 +241,7 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
       if (ERROR_OK != ret)
         return ret;
       
-      return target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_WRITE);
+      return target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_READ);
     }
     else {
       ret = target_write_u32(bank->target, bank_info->reg_erasctr, (addr >> 8));
@@ -552,6 +552,7 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 {
     struct target *target = bank->target;
     uint8_t *new_buffer = NULL;
+    struct gct301s_flash_bank *bank_info = bank->driver_priv;
 
     if (target->state != TARGET_HALTED) {
         LOG_ERROR("Target not halted");
@@ -568,6 +569,12 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 
     /* unlock flash registers */
     gct301s_flash_lock(bank, 0);
+    
+    if (bank->base == GCT301S_NVR_BASE) {
+      retval = target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_WRITE);
+      if (ERROR_OK != retval)
+        return retval;
+    }
 
     /* try using a block write */
     retval = gct301s_write_block(bank, buffer, offset, bytes_remaining);
@@ -593,6 +600,9 @@ static int gct301s_write(struct flash_bank *bank, const uint8_t *buffer,
 
 reset_pg_and_lock:
     gct301s_flash_lock(bank, 1);
+    if (bank->base == GCT301S_NVR_BASE) {
+      retval = target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_READ);
+    }
 
 cleanup:
     if (new_buffer)
@@ -722,6 +732,8 @@ static int gct301s_probe(struct flash_bank *bank)
       gct301s_info->reg_prog       = GCT301S_CFLASH_PROG;
       gct301s_info->reg_if         = GCT301S_CFLASH_IF;
     }
+
+    LOG_DEBUG("Done probe");
 
     return ERROR_OK;
 }
