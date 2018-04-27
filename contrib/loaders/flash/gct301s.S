@@ -66,6 +66,8 @@ wait_fifo:
     ldrb    r6, [r5]                            /* store data in PROGDATA !!!byte!!! */
     str     r6, [r0, #GCT301S_FLASH_PROGDATA]   
    
+	ldr     r6, [r0, #GCT301S_FLASH_IF]
+
     movs    r6, #1                              /* set MPROG */
     str     r6, [r0, #GCT301S_FLASH_PROG]
 

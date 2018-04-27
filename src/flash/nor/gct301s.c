@@ -77,8 +77,8 @@
 #define GCT301S_FLASH_NVRP_WRITE 0x5AA5
 #define GCT301S_FLASH_NVRP_READ  0xA55A
 
-#define GCT301S_FLASH_ERASE_TMO  10
-#define GCT301S_FLASH_WRITE_TMO  10
+#define GCT301S_FLASH_ERASE_TMO  100
+#define GCT301S_FLASH_WRITE_TMO  100
 
 #define GCT301S_FLASH_IF_MASK    0x1
 
@@ -194,7 +194,7 @@ static int gct301s_wait_status(struct flash_bank *bank, int timeout,
     uint32_t status = 0;
 
     uint32_t reg = (bank->base == GCT301S_DATA_BASE ? GCT301S_DFLASH_IF : GCT301S_CFLASH_IF);
-
+   
     while (1) {
         ret = target_read_u32(bank->target, reg, &status);
         if (ERROR_OK != ret)
@@ -221,9 +221,10 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
     int ret = 0;
     uint32_t status = 0;
     struct gct301s_flash_bank *bank_info = bank->driver_priv;
-
-    LOG_DEBUG("erasing flash page at 0x%08" PRIx32, bank->base+addr);
- 
+    
+    printf("                         \r");
+    printf("erasing page at 0x%08x\r", bank->base+addr);
+    
     if (bank->base == GCT301S_NVR_BASE) {
       ret = target_write_u32(bank->target, bank_info->reg_flash_nvrp, GCT301S_FLASH_NVRP_WRITE);
       if (ERROR_OK != ret)
@@ -232,8 +233,12 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
       ret = target_write_u32(bank->target, bank_info->reg_erasctr, (addr >> 8));
       if (ERROR_OK != ret)
         return ret;
+      
+      ret = target_read_u32(bank->target, bank_info->reg_if, &status);
+      if (ERROR_OK != ret)
+        return ret;
 
-      ret = target_write_u32(bank->target, bank_info->reg_era, 0x4);
+      ret = target_write_u32(bank->target, bank_info->reg_era, 0x4 | 0x100);
       if (ERROR_OK != ret)
         return ret;
 
@@ -247,8 +252,12 @@ static int gct301s_erase_page(struct flash_bank *bank, uint32_t addr)
       ret = target_write_u32(bank->target, bank_info->reg_erasctr, (addr >> 8));
       if (ERROR_OK != ret)
         return ret;
+      
+      ret = target_read_u32(bank->target, bank_info->reg_if, &status);
+      if (ERROR_OK != ret)
+        return ret;
 
-      ret = target_write_u32(bank->target, bank_info->reg_era, 0x1);
+      ret = target_write_u32(bank->target, bank_info->reg_era, 0x1 | 0x100);
       if (ERROR_OK != ret)
         return ret;
 
@@ -277,13 +286,13 @@ static int gct301s_erase(struct flash_bank *bank, int first, int last)
     LOG_DEBUG("Flash write enabled");
   
     LOG_DEBUG("Flash erase started");
-    
+   
     for (i = first; i <= last; i++) {
         ret = gct301s_erase_page(bank, bank->sectors[i].offset);
         if (ERROR_OK != ret)
             LOG_ERROR("Failed to erase page %d", i);
     }
-  
+    printf("\n"); 
     LOG_DEBUG("Flash erase ended");
     
     ret = gct301s_flash_lock(bank, 1);
@@ -348,7 +357,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
     uint32_t offset, uint32_t count)
 {
     struct target *target = bank->target;
-    uint32_t buffer_size = 4096;
+    uint32_t buffer_size = 2048;
     struct working_area *write_algorithm;
     struct working_area *source;
     uint32_t address = bank->base + offset;
@@ -370,6 +379,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
         0x04, 0x61,         /* str    r4, [r0, #16]  */
         0x2e, 0x78,         /* ldrb   r6, [r5, #0]   */
         0x46, 0x61,         /* str    r6, [r0, #20]  */
+        0x06, 0x6a,         /* ldr    r6, [r0, #32]  */ 
         0x01, 0x26,         /* movs   r6, #1         */
         0x86, 0x61,         /* str    r6, [r0, #24]  */
         0x01, 0x35,         /* adds   r5, #1         */
@@ -388,7 +398,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
         0x01, 0x39,         /* subs   r1, #1         */
         0x00, 0x29,         /* cmp    r1, #0         */
         0x00, 0xd0,         /* beq    exit           */
-        0xe5, 0xe7,         /* b      wait_fifo      */
+        0xe4, 0xe7,         /* b      wait_fifo      */
         /* exit: */
         0x30, 0x46,         /* mov    r0, r6         */
         0x00, 0xbe,         /* bkpt   0x0000         */
@@ -405,6 +415,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
         0x04, 0x61,         /* str    r4, [r0, #16]  */
         0x2e, 0x78,         /* ldrb   r6, [r5, #0]   */
         0x46, 0x61,         /* str    r6, [r0, #20]  */
+        0x06, 0x6a,         /* ldr    r6, [r0, #32]  */ 
         0x02, 0x26,         /* movs   r6, #1         */
         0x86, 0x61,         /* str    r6, [r0, #24]  */
         0x01, 0x35,         /* adds   r5, #1         */
@@ -423,7 +434,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
         0x01, 0x39,         /* subs   r1, #1         */
         0x00, 0x29,         /* cmp    r1, #0         */
         0x00, 0xd0,         /* beq    exit           */
-        0xe5, 0xe7,         /* b      wait_fifo      */
+        0xe4, 0xe7,         /* b      wait_fifo      */
         /* exit: */
         0x30, 0x46,         /* mov    r0, r6         */
         0x00, 0xbe,         /* bkpt   0x0000         */
@@ -431,7 +442,7 @@ static int gct301s_write_block(struct flash_bank *bank, const uint8_t *buf,
 
     uint8_t *flash_write_code;
 
-    LOG_INFO("Writing bank %d (base = 0x%08" PRIx32 ")", bank->bank_number, bank->base);
+    LOG_INFO("writing bank %d (base = 0x%08" PRIx32 ")", bank->bank_number, bank->base);
 
     if (bank->base == GCT301S_NVR_BASE) {
       flash_write_code  = (uint8_t *)gct301s_flash_write_code_1; 
@@ -633,7 +644,10 @@ static int gct301s_probe(struct flash_bank *bank)
         return ret;
     }
 
-    ret = target_write_u32(bank->target, GCT301S_LSRC_CTL , read_val | 0x1);
+    read_val = read_val & (~0x3);
+    read_val = read_val | 0x1;
+
+    ret = target_write_u32(bank->target, GCT301S_LSRC_CTL , read_val);
     if (ERROR_OK != ret) {
         LOG_ERROR("Fail to write LSRC_CTL");
         return ret;
@@ -645,7 +659,9 @@ static int gct301s_probe(struct flash_bank *bank)
         return ret;
     }
 
-    ret = target_write_u32(bank->target, GCT301S_HSRC_CTL , read_val & (~0x2));
+    read_val = read_val & (~0x2);
+
+    ret = target_write_u32(bank->target, GCT301S_HSRC_CTL , read_val);
     if (ERROR_OK != ret) {
         LOG_ERROR("Fail to write HSRC_CTL");
         return ret;
@@ -663,7 +679,17 @@ static int gct301s_probe(struct flash_bank *bank)
         return ret;
     }
 
-
+    ret = target_write_u32(bank->target, GCT301S_CFLASH_TIME , 0x0);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write CFLASH_TIME");
+        return ret;
+    }
+    ret = target_write_u32(bank->target, GCT301S_DFLASH_TIME , 0x0);
+    if (ERROR_OK != ret) {
+        LOG_ERROR("Fail to write DFLASH_TIME");
+        return ret;
+    }
+    
     gct301s_info->probed = 0;
 
     ret = gct301s_read_info(bank, &gct_mcu_info);
