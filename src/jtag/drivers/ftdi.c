@@ -694,6 +694,18 @@ static int ftdi_quit(void)
 {
 	mpsse_close(mpsse_ctx);
 
+	struct signal *sig = signals;
+	while (sig) {
+		struct signal *next = sig->next;
+		free((void *)sig->name);
+		free(sig);
+		sig = next;
+	}
+
+	free(ftdi_device_desc);
+	free(ftdi_serial);
+	free(ftdi_location);
+
 	free(swd_cmd_queue);
 
 	return ERROR_OK;
@@ -1064,8 +1076,19 @@ static int ftdi_swd_init(void)
 static void ftdi_swd_swdio_en(bool enable)
 {
 	struct signal *oe = find_signal_by_name("SWDIO_OE");
-	if (oe)
-		ftdi_set_signal(oe, enable ? '1' : '0');
+	if (oe) {
+		if (oe->data_mask)
+			ftdi_set_signal(oe, enable ? '1' : '0');
+		else {
+			/* Sets TDI/DO pin (pin 2) to input during rx when both pins are connected
+			   to SWDIO */
+			if (enable)
+				direction |= jtag_direction_init & 0x0002U;
+			else
+				direction &= ~0x0002U;
+			mpsse_set_data_bits_low_byte(mpsse_ctx, output & 0xff, direction & 0xff);
+		}
+	}
 }
 
 /**
@@ -1218,14 +1241,17 @@ static int ftdi_swd_switch_seq(enum swd_special_seq seq)
 	switch (seq) {
 	case LINE_RESET:
 		LOG_DEBUG("SWD line reset");
+		ftdi_swd_swdio_en(true);
 		mpsse_clock_data_out(mpsse_ctx, swd_seq_line_reset, 0, swd_seq_line_reset_len, SWD_MODE);
 		break;
 	case JTAG_TO_SWD:
 		LOG_DEBUG("JTAG-to-SWD");
+		ftdi_swd_swdio_en(true);
 		mpsse_clock_data_out(mpsse_ctx, swd_seq_jtag_to_swd, 0, swd_seq_jtag_to_swd_len, SWD_MODE);
 		break;
 	case SWD_TO_JTAG:
 		LOG_DEBUG("SWD-to-JTAG");
+		ftdi_swd_swdio_en(true);
 		mpsse_clock_data_out(mpsse_ctx, swd_seq_swd_to_jtag, 0, swd_seq_swd_to_jtag_len, SWD_MODE);
 		break;
 	default:

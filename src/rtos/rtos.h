@@ -54,12 +54,13 @@ struct rtos {
 	struct thread_detail *thread_details;
 	int thread_count;
 	int (*gdb_thread_packet)(struct connection *connection, char const *packet, int packet_size);
+	int (*gdb_target_for_threadid)(struct connection *connection, int64_t thread_id, struct target **p_target);
 	void *rtos_specific_params;
 };
 
 struct rtos_type {
 	const char *name;
-	int (*detect_rtos)(struct target *target);
+	bool (*detect_rtos)(struct target *target);
 	int (*create)(struct target *target);
 	int (*smp_init)(struct target *target);
 	int (*update_threads)(struct rtos *rtos);
