@@ -940,4 +940,5 @@ struct flash_driver gct301s_flash = {
     .erase_check = default_flash_blank_check,
     .protect_check = gct301s_protect_check,
     .info = get_gct301s_info,
+	.free_driver_priv = default_flash_free_driver_priv,
 };
